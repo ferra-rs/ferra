@@ -61,6 +61,7 @@ program, from the database connection to `axum::serve`):
 
 ```rust
 let app = Foundry::new(conn)
+    .etag_key(std::env::var("ETAG_KEY")?)?
     .with_auth::<MyClaims>(jwt)
     .mount::<film::Model>()
     .with_docs()
@@ -77,6 +78,7 @@ You get all of the following without writing more code.
 | `GET`    | `/films/{id}` | One resource by key |
 | `POST`   | `/films`      | Create: `201` and a `Location` header; the server chooses the key |
 | `PUT`    | `/films/{id}` | Update the row the path names: `200`, or `404` |
+| `PATCH`  | `/films/{id}` | Change the fields the body names (`application/merge-patch+json`) and leave the others: `200`, or `404` |
 | `DELETE` | `/films/{id}` | Delete: `204`, or `404` |
 
 ### Authorization that refuses by default
@@ -86,6 +88,22 @@ posture does not compile, and a model that needs an identity does not mount on
 a chain without `.with_auth()`. `#[authorize(...)]` states a rule per operation
 (`IsOwner`, `HasRole(...)`, `Authenticated`, `Anyone`), and Ferra sets the
 owner of a new row from the token.
+
+### Declared actions
+
+An action is a business verb on a row, such as `POST /jobs/{id}/mark_seen` or
+`POST /invoices/{id}/cancel`. The model declares it and you write the function
+that changes the row. Ferra serves the route and judges each request with what a
+`PUT` gets: the rule, the lock, the preconditions, the validation, the write, the
+hooks, the retry, the ETag and the `_links`. The collection form applies the same
+action to up to 100 rows in one request.
+
+### Preconditions on a write
+
+`PUT`, `PATCH`, `DELETE`, restore and row actions accept `If-Match` and
+`If-None-Match`. A client that read a row sends its tag back to write only if
+nobody changed the row since; a stale tag answers `412`. `If-Match` is optional:
+a write without it goes through as it always did.
 
 ### Hypermedia `_links` in the HAL representation
 
@@ -135,8 +153,8 @@ from a **closed** set that the framework keeps as a constant.
 ### Validation, behaviors and security defaults
 
 - `#[field(min_length, max_length, min, max, pattern, email, url, required)]`
-  validates request bodies before the query runs; a violation answers `422`
-  with every failing field.
+  validates `POST` and `PUT` bodies before the query runs, and the values a
+  `PATCH` sets; a violation answers `422` with every failing field.
 - `#[behavior(timestampable, soft_delete)]` manages `created_at`, `updated_at`
   and `deleted_at`.
 - Rate limiting on mutation routes, a 1 MiB body cap and restrictive CORS come
